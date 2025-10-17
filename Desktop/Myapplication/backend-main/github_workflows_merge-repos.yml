@@ -1,0 +1,78 @@
+name: Merge backend-ai and backend-napasa into subfolders
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout target repo (this repo)
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Checkout backend-ai
+        uses: actions/checkout@v4
+        with:
+          repository: sheddy-cloud/backend-ai
+          path: backend-ai-temp
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Checkout backend-napasa
+        uses: actions/checkout@v4
+        with:
+          repository: sheddy-cloud/backend-napasa
+          path: backend-napasa-temp
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Install git-filter-repo
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip
+          pip3 install --upgrade git-filter-repo
+
+      - name: Rewrite backend-ai main into ai-backend and push temp branch
+        run: |
+          set -e
+          cd backend-ai-temp
+          # ensure main exists
+          git checkout main
+          # Rewrite main to subdirectory
+          git filter-repo --refs refs/heads/main --to-subdirectory-filter ai-backend
+          # Add target repo and push rewritten main as ai-backend-main (force to ensure clean)
+          git remote add target https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/sheddy-cloud/backend.git
+          git push target refs/heads/main:refs/heads/ai-backend-main --force
+
+      - name: Rewrite backend-napasa main into main-backend and push temp branch
+        run: |
+          set -e
+          cd backend-napasa-temp
+          git checkout main
+          git filter-repo --refs refs/heads/main --to-subdirectory-filter main-backend
+          git remote add target https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/sheddy-cloud/backend.git
+          git push target refs/heads/main:refs/heads/main-backend-main --force
+
+      - name: Fetch temp branches and merge into main
+        run: |
+          set -e
+          # we're in the target repo working directory thanks to the first checkout
+          git fetch origin ai-backend-main:ai-backend-main || git fetch origin refs/heads/ai-backend-main:refs/heads/ai-backend-main
+          git fetch origin main-backend-main:main-backend-main || git fetch origin refs/heads/main-backend-main:refs/heads/main-backend-main
+          git checkout main
+          # Merge rewritten histories (allow unrelated histories). Use --no-edit to auto-merge where possible.
+          git merge --allow-unrelated-histories ai-backend-main --no-edit || true
+          git merge --allow-unrelated-histories main-backend-main --no-edit || true
+          # Push the combined main
+          git push origin main
+
+      - name: Cleanup remote temporary branches (optional)
+        run: |
+          set -e
+          git push origin --delete ai-backend-main || true
+          git push origin --delete main-backend-main || true
